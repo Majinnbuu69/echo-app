@@ -839,17 +839,21 @@ function SettingsScreen({ isPremium, setIsPremium, lang, setLang }: { isPremium:
           </GlassCard>
         </View>
 
-        {!isPremium && (
-          <TouchableOpacity 
-            style={styles.upgradeButton}
-            onPress={() => {
-              setIsPremium(true);
-              Alert.alert(t.premiumActivated, t.welcomePremium);
-            }}
-          >
-            <Text style={styles.upgradeButtonText}>{t.upgradeToPremium}</Text>
-          </TouchableOpacity>
-        )}
+        {/* TEST PREMIUM BUTTON */}
+        <TouchableOpacity 
+          style={[styles.upgradeButton, isPremium && styles.testPremiumButton]}
+          onPress={() => {
+            setIsPremium(!isPremium);
+            Alert.alert(
+              isPremium ? 'Premium Disabled' : t.premiumActivated, 
+              isPremium ? 'You are now on Free plan' : 'Welcome to Echo Premium!'
+            );
+          }}
+        >
+          <Text style={styles.upgradeButtonText}>
+            {isPremium ? '🔓 Disable Premium (Test)' : '🎁 Test Premium Free'}
+          </Text>
+        </TouchableOpacity>
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>Echo V3.1 • iOS 26</Text>
@@ -1124,6 +1128,7 @@ const styles = StyleSheet.create({
   langButtonTextActive: { color: colors.accent },
   
   upgradeButton: { backgroundColor: colors.accent, borderRadius: 14, padding: 18, alignItems: 'center', marginTop: 10 },
+  testPremiumButton: { backgroundColor: colors.success },
   upgradeButtonText: { fontSize: 16, fontWeight: '600', color: colors.text },
   
   footer: { alignItems: 'center', marginTop: 40, marginBottom: 20 },
