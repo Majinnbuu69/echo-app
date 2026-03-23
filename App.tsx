@@ -807,9 +807,10 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
 }
 
 // ====== SETTINGS SCREEN ======
-function SettingsScreen({ isPremium, setIsPremium, lang, setLang, user, onLogout }: any) {
+function SettingsScreen({ isPremium, setIsPremium, lang, setLang, user, onLogout, entries }: any) {
   const t = translations[lang];
   const [dailyReminder, setDailyReminder] = useState(false);
+  const storageSize = entries && entries.length > 0 ? `${(JSON.stringify(entries).length / 1024).toFixed(1)} KB` : '0 KB';
 
   return (
     <View style={styles.container}>
@@ -851,7 +852,7 @@ function SettingsScreen({ isPremium, setIsPremium, lang, setLang, user, onLogout
             </View>
             <View style={[styles.settingsRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.settingsRowText}>{t.storage}</Text>
-              <Text style={styles.settingsRowValue}>{entries.length > 0 ? `${(JSON.stringify(entries).length / 1024).toFixed(1)} KB` : '0 KB'}</Text>
+              <Text style={styles.settingsRowValue}>{storageSize}</Text>
             </View>
           </GlassCard>
         </View>
@@ -991,7 +992,7 @@ export default function App() {
           {() => <InsightsScreen entries={entries} isPremium={isPremium} lang={lang} />}
         </Tab.Screen>
         <Tab.Screen name="Settings" options={{ tabBarIcon: ({ color }) => <Icons.settings color={color} size={22} />, tabBarLabel: t.settings }}>
-          {() => <SettingsScreen isPremium={isPremium} setIsPremium={setIsPremium} lang={lang} setLang={setLang} user={user} onLogout={handleLogout} />}
+          {() => <SettingsScreen isPremium={isPremium} setIsPremium={setIsPremium} lang={lang} setLang={setLang} user={user} onLogout={handleLogout} entries={entries} />}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>
