@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, StatusBar, Switch, Platform } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, StatusBar, Switch, Platform, TextInputProps } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,18 +20,11 @@ type Entry = {
   createdAt: string;
 };
 
-type Insight = {
-  label: string;
-  value: string;
-  change: number;
-};
-
-type AIAnalysis = {
-  summary: string;
-  sentiment: string;
-  advice: string[];
-  keywords: string[];
-  moodTrend: string;
+type User = {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
 };
 
 // Daily challenges pool
@@ -52,7 +45,7 @@ const translations = {
     home: 'Home', record: 'Record', insights: 'Insights', settings: 'Settings',
     today: 'today', recent: 'Recent', noEchoes: 'No echoes yet', startRecording: 'Start recording your first thought',
     newEcho: 'New Echo', dailyChallenge: 'Daily Challenge', voice: 'Voice', text: 'Text',
-    howFeel: 'How do you feel?', tapToRecord: 'Tap to record', saveEcho: 'Save Echo',
+    howFeel: 'How do you feel?', howFeelAuto: 'Or let AI guess:', tapToRecord: 'Tap to record', saveEcho: 'Save Echo',
     submitChallenge: 'Submit Challenge', premium: 'Premium', upgrade: 'Upgrade',
     insightsTitle: 'Insights', notEnoughData: 'Not enough data', recordMore: 'Record more echoes',
     moodJourney: 'Mood Journey', premiumTitle: 'Echo Premium', premiumText: 'Full AI analysis, voice playback, unlimited storage.',
@@ -69,12 +62,16 @@ const translations = {
     aiAnalysis: 'AI Analysis', summary: 'Summary', advice: 'Advice', keywords: 'Keywords',
     voiceNote: 'Voice Note', tapToPlay: 'Tap to play', premiumFeature: 'Premium Feature',
     testPremium: 'Test Premium', disablePremium: 'Disable Premium (Test)',
+    login: 'Login', register: 'Register', email: 'Email', password: 'Password', name: 'Name',
+    logout: 'Logout', welcomeBack: 'Welcome back', createAccount: 'Create Account',
+    autoMood: 'Auto-detected mood', estimatedMood: 'Estimated mood',
+    speechToText: 'Speech to Text', listening: 'Listening...', tapToSpeak: 'Tap to speak',
   },
   fr: {
     home: 'Accueil', record: 'Enregistrer', insights: 'Analyses', settings: 'Paramètres',
     today: "aujourd'hui", recent: 'Récent', noEchoes: 'Pas encore d\'échos', startRecording: 'Commencez à enregistrer',
     newEcho: 'Nouvel Écho', dailyChallenge: 'Défi du jour', voice: 'Voix', text: 'Texte',
-    howFeel: 'Comment vous sentez-vous?', tapToRecord: 'Appuyez pour enregistrer', saveEcho: 'Sauvegarder',
+    howFeel: 'Comment vous sentez-vous?', howFeelAuto: 'Ou laissez l\'IA deviner:', tapToRecord: 'Appuyez pour enregistrer', saveEcho: 'Sauvegarder',
     submitChallenge: 'Soumettre', premium: 'Premium', upgrade: 'Mettre à jour',
     insightsTitle: 'Analyses', notEnoughData: 'Pas assez de données', recordMore: 'Enregistrez plus',
     moodJourney: 'Parcours émotionnel', premiumTitle: 'Echo Premium', premiumText: 'Analyse IA complète, lecture vocale, stockage illimité.',
@@ -91,6 +88,10 @@ const translations = {
     aiAnalysis: 'Analyse IA', summary: 'Résumé', advice: 'Conseils', keywords: 'Mots-clés',
     voiceNote: 'Note vocale', tapToPlay: 'Appuyez pour écouter', premiumFeature: 'Fonction Premium',
     testPremium: 'Tester Premium', disablePremium: 'Désactiver Premium (Test)',
+    login: 'Connexion', register: 'S\'inscrire', email: 'Email', password: 'Mot de passe', name: 'Nom',
+    logout: 'Déconnexion', welcomeBack: 'Bon retour', createAccount: 'Créer un compte',
+    autoMood: 'Humeur auto-détectée', estimatedMood: 'Humeur estimée',
+    speechToText: 'Dictée vocale', listening: 'Écoute en cours...', tapToSpeak: 'Appuyez pour parler',
   },
 };
 
@@ -107,6 +108,41 @@ const detectLanguage = (): 'en' | 'fr' => {
   const locale = Platform.OS === 'ios' ? (Intl as any).preferredLanguages?.[0] || 'en' : (Intl as any).defaultLocale || 'en';
   if (locale.startsWith('fr')) return 'fr';
   return 'en';
+};
+
+// ====== MOOD ANALYSIS AI ======
+const analyzeMoodFromText = (text: string): number => {
+  const lowerText = text.toLowerCase();
+  
+  // Very positive words
+  const veryPositive = ['amazing', 'fantastic', 'wonderful', 'excellent', 'love', 'best', 'incredible', 'perfect', 'blessed', 'grateful', 'joy', 'happy', 'super', 'génial', 'merveilleux', 'excellent', 'aimé', 'heureux', 'merci', 'béat', 'gratitude'];
+  // Positive words
+  const positive = ['good', 'great', 'nice', 'happy', 'glad', 'pleased', 'satisfied', 'content', 'bien', 'content', 'satisfait', 'heureux'];
+  // Negative words
+  const negative = ['sad', 'bad', 'terrible', 'awful', 'hate', 'angry', 'frustrated', 'disappointed', 'worried', 'anxious', 'scared', 'triste', 'mauvais', 'terrible', 'colère', 'frustré', 'déçu', 'inquiet', 'effrayé'];
+  // Very negative words
+  const veryNegative = ['devastated', 'heartbroken', 'depressed', 'suffering', 'desperate', 'hopeless', 'écrasé', 'coeur brisé', 'déprimé', 'souffrant', 'désespéré', 'sans espoir'];
+  
+  let score = 3; // neutral baseline
+  
+  veryPositive.forEach(w => { if (lowerText.includes(w)) score += 1.5; });
+  positive.forEach(w => { if (lowerText.includes(w)) score += 0.8; });
+  negative.forEach(w => { if (lowerText.includes(w)) score -= 0.8; });
+  veryNegative.forEach(w => { if (lowerText.includes(w)) score -= 1.5; });
+  
+  // Clamp between 1-5
+  return Math.max(1, Math.min(5, Math.round(score)));
+};
+
+const getMoodLabel = (mood: number, lang: 'en' | 'fr'): string => {
+  const labels = {
+    1: lang === 'fr' ? 'Triste' : 'Sad',
+    2: lang === 'fr' ? 'Bas' : 'Down', 
+    3: lang === 'fr' ? 'Neutre' : 'Okay',
+    4: lang === 'fr' ? 'Bien' : 'Good',
+    5: lang === 'fr' ? 'Super' : 'Great',
+  };
+  return labels[mood as keyof typeof labels] || labels[3];
 };
 
 // V3 Icons
@@ -161,29 +197,28 @@ const Icons = {
   stop: ({ color, size = 20 }: { color: string; size?: number }) => (
     <View style={{ width: size * 0.5, height: size * 0.5, backgroundColor: color, borderRadius: 2 }} />
   ),
-  sparkles: ({ color, size = 22 }: { color: string; size?: number }) => (
-    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
-      <Text style={{ fontSize: size * 0.8, color }}>✦</Text>
-    </View>
-  ),
   brain: ({ color, size = 22 }: { color: string; size?: number }) => (
     <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
       <Text style={{ fontSize: size * 0.7, color }}>🧠</Text>
+    </View>
+  ),
+  user: ({ color, size = 22 }: { color: string; size?: number }) => (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ width: size * 0.5, height: size * 0.5, borderWidth: 2, borderColor: color, borderRadius: size * 0.25 }} />
+      <View style={{ width: size * 0.7, height: size * 0.35, borderWidth: 2, borderColor: color, borderRadius: size * 0.175, position: 'absolute', bottom: 0 }} />
     </View>
   ),
 };
 
 const Tab = createBottomTabNavigator();
 
-// iOS 26 Colors
 const colors = {
   bg: '#0A0A1A', bgSecondary: '#1C1C1E', bgTertiary: '#2C2C2E',
   glass: 'rgba(255,255,255,0.08)', glassBorder: 'rgba(255,255,255,0.12)', glassHover: 'rgba(255,255,255,0.15)',
   accent: '#007AFF', accentSecondary: '#5E5CE6', accentGradient: ['#007AFF', '#5E5CE6'],
   text: '#FFFFFF', textSecondary: 'rgba(255,255,255,0.7)', textTertiary: 'rgba(255,255,255,0.4)',
   success: '#30D158', warning: '#FF9F0A', danger: '#FF453A',
-  gold: '#FFD60A', silver: '#8E8E93',
-  ai: '#A855F7', aiGradient: ['#A855F7', '#6366F1'],
+  gold: '#FFD60A', silver: '#8E8E93', ai: '#A855F7', aiGradient: ['#A855F7', '#6366F1'],
 };
 
 function GlassCard({ children, style, onPress }: any) {
@@ -207,75 +242,79 @@ function EmotionCard({ emotion, selected, onPress, lang }: { emotion: any, selec
   );
 }
 
-// ====== REAL AI ANALYSIS FUNCTION ======
-const generateAIAnalysis = (entries: Entry[], lang: 'en' | 'fr'): AIAnalysis => {
-  const textEntries = entries.filter(e => e.type === 'text');
-  const allText = textEntries.map(e => e.content).join(' ').toLowerCase();
-  const moods = entries.map(e => e.mood);
-  const avgMood = moods.length > 0 ? moods.reduce((a, b) => a + b, 0) / moods.length : 3;
-  
-  // Analyze sentiment and keywords
-  const positiveWords = ['happy', 'grateful', 'love', 'good', 'great', 'amazing', 'excellent', 'joy', 'thank', 'blessed', 'content', 'peaceful', 'heureux', 'aimé', 'bien', 'super', 'merci', 'béat'];
-  const negativeWords = ['sad', 'angry', 'fear', 'anxious', 'worried', 'stress', 'tired', 'frustrated', 'alone', 'lost', 'triste', 'colère', 'peur', 'stress', 'fatigué', 'seul', 'perdu'];
-  const growthWords = ['goal', 'learn', 'improve', 'work', 'progress', 'practice', 'habit', 'routine', 'exercise', 'read', 'goal', 'apprendre', 'améliorer', 'progrès', 'pratique', 'routine', 'exercice'];
-  
-  const positiveCount = positiveWords.filter(w => allText.includes(w)).length;
-  const negativeCount = negativeWords.filter(w => allText.includes(w)).length;
-  const growthCount = growthWords.filter(w => allText.includes(w)).length;
-  
-  // Detect keywords
-  const keywords: string[] = [];
-  if (allText.includes('work') || allText.includes('job')) keywords.push(lang === 'fr' ? 'Travail' : 'Work');
-  if (allText.includes('family') || allText.includes('friend')) keywords.push(lang === 'fr' ? 'Relations' : 'Relationships');
-  if (allText.includes('health') || allText.includes('sleep') || allText.includes('exercise')) keywords.push(lang === 'fr' ? 'Santé' : 'Health');
-  if (allText.includes('money') || allText.includes('finance')) keywords.push(lang === 'fr' ? 'Finance' : 'Finance');
-  if (allText.includes('love') || allText.includes('relationship')) keywords.push(lang === 'fr' ? 'Amour' : 'Love');
-  
-  // Generate sentiment
-  let sentiment: string;
-  if (positiveCount > negativeCount + 2) sentiment = lang === 'fr' ? 'Très Positif' : 'Very Positive';
-  else if (positiveCount > negativeCount) sentiment = lang === 'fr' ? 'Plutôt Positif' : 'Positive';
-  else if (negativeCount > positiveCount + 2) sentiment = lang === 'fr' ? 'Très Négatif' : 'Very Negative';
-  else if (negativeCount > positiveCount) sentiment = lang === 'fr' ? 'Plutôt Négatif' : 'Negative';
-  else sentiment = lang === 'fr' ? 'Neutre' : 'Neutral';
-  
-  // Generate summary
-  let summary: string;
-  if (lang === 'fr') {
-    summary = `Tu as enregistré ${entries.length} échos. Ton humeur moyenne est ${avgMood.toFixed(1)}/5. Ton sentiment général est ${sentiment.toLowerCase()}.`;
-  } else {
-    summary = `You've recorded ${entries.length} echoes. Your average mood is ${avgMood.toFixed(1)}/5. Your overall sentiment is ${sentiment.toLowerCase()}.`;
-  }
-  
-  // Generate advice
-  const advice: string[] = [];
-  if (negativeCount > positiveCount) {
-    advice.push(lang === 'fr' ? '🧘 Essaie de méditer 5 minutes par jour pour réduire le stress.' : '🧘 Try meditating 5 minutes daily to reduce stress.');
-  }
-  if (growthCount > 0) {
-    advice.push(lang === 'fr' ? '🌱 Continue à te concentrer sur tes objectifs de croissance personnelle.' : '🌱 Keep focusing on your personal growth goals.');
-  }
-  if (avgMood < 3) {
-    advice.push(lang === 'fr' ? '💡 Pense à des activités qui te rendent heureux - même petites.' : '💡 Think about activities that make you happy - even small ones.');
-  }
-  if (entries.length < 5) {
-    advice.push(lang === 'fr' ? '📝 Essaie de noter plus souvent pour avoir plus de données sur toi.' : '📝 Try journaling more often to get more data about yourself.');
-  }
-  if (positiveCount > negativeCount) {
-    advice.push(lang === 'fr' ? '✨ Tu sembles dans une bonne période - Profites-en pour fixer de nouveaux objectifs!' : '✨ You seem to be in a good period - Use it to set new goals!');
-  }
-  if (advice.length === 0) {
-    advice.push(lang === 'fr' ? '💪 Continue à t\'exprimer régulièrement. Chaque écho est un pas vers mieux te connaître.' : '💪 Keep expressing yourself regularly. Each echo is a step toward knowing yourself better.');
-  }
-  
-  // Mood trend
-  const moodTrend = avgMood >= 4 ? (lang === 'fr' ? 'En hausse 📈' : 'Rising 📈') : avgMood >= 3 ? (lang === 'fr' ? 'Stable ➡️' : 'Stable ➡️') : (lang === 'fr' ? 'En baisse 📉' : 'Declining 📉');
-  
-  return { summary, sentiment, advice, keywords, moodTrend };
-};
+// ====== AUTH SCREEN ======
+function AuthScreen({ onLogin, lang }: { onLogin: (user: User) => void, lang: 'en' | 'fr' }) {
+  const t = translations[lang];
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleAuth = async () => {
+    if (!email || !password) {
+      Alert.alert(lang === 'fr' ? 'Erreur' : 'Error', lang === 'fr' ? 'Veuillez remplir tous les champs' : 'Please fill all fields');
+      return;
+    }
+    
+    setLoading(true);
+    
+    // Simulate auth (in production, this would call a backend)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const user: User = {
+      id: Date.now().toString(),
+      email,
+      name: name || email.split('@')[0],
+      createdAt: new Date().toISOString(),
+    };
+    
+    // Save user to storage
+    await AsyncStorage.setItem('currentUser', JSON.stringify(user));
+    
+    setLoading(false);
+    onLogin(user);
+  };
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={[colors.bg, colors.bgSecondary]} style={StyleSheet.absoluteFill} />
+      <ScrollView contentContainerStyle={styles.authContent}>
+        <View style={styles.authHeader}>
+          <Text style={styles.authLogo}>Echo</Text>
+          <Text style={styles.authSubtitle}>{isRegister ? t.createAccount : t.welcomeBack}</Text>
+        </View>
+
+        <GlassCard style={styles.authCard}>
+          {isRegister && (
+            <TextInput style={styles.authInput} placeholder={t.name} placeholderTextColor={colors.textTertiary}
+              value={name} onChangeText={setName} autoCapitalize="words" />
+          )}
+          <TextInput style={styles.authInput} placeholder={t.email} placeholderTextColor={colors.textTertiary}
+            value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={styles.authInput} placeholder={t.password} placeholderTextColor={colors.textTertiary}
+            value={password} onChangeText={setPassword} secureTextEntry />
+          
+          <TouchableOpacity style={styles.authButton} onPress={handleAuth} disabled={loading}>
+            <LinearGradient colors={colors.accentGradient} style={styles.authButtonGradient}>
+              <Text style={styles.authButtonText}>{loading ? '...' : (isRegister ? t.register : t.login)}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.authSwitch} onPress={() => setIsRegister(!isRegister)}>
+            <Text style={styles.authSwitchText}>
+              {isRegister ? (lang === 'fr' ? 'Déjà un compte? Connectez-vous' : 'Already have an account? Login') : 
+                (lang === 'fr' ? 'Pas de compte? Créez-en un' : 'No account? Create one')}
+            </Text>
+          </TouchableOpacity>
+        </GlassCard>
+      </ScrollView>
+    </View>
+  );
+}
 
 // ====== HOME SCREEN ======
-function HomeScreen({ entries, todayEntries, streak, isPremium, lang }: { entries: Entry[], todayEntries: Entry[], streak: number, isPremium: boolean, lang: 'en' | 'fr' }) {
+function HomeScreen({ entries, todayEntries, streak, isPremium, lang, user }: { entries: Entry[], todayEntries: Entry[], streak: number, isPremium: boolean, lang: 'en' | 'fr', user: User | null }) {
   const t = translations[lang];
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const fireAnim = useRef(new Animated.Value(1)).current;
@@ -300,7 +339,7 @@ function HomeScreen({ entries, todayEntries, streak, isPremium, lang }: { entrie
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <Text style={styles.logo}>Echo</Text>
-          <Text style={styles.subtitle}>{t.today}</Text>
+          {user && <Text style={styles.userName}>{lang === 'fr' ? 'Bonjour' : 'Hello'}, {user.name} 👋</Text>}
         </View>
 
         {streak > 0 ? (
@@ -382,6 +421,7 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
   const [textNote, setTextNote] = useState('');
   const [mode, setMode] = useState<'voice' | 'text'>('voice');
   const [mood, setMood] = useState(3);
+  const [autoDetectedMood, setAutoDetectedMood] = useState<number | null>(null);
   const [showChallenge, setShowChallenge] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [bounceAnim] = useState(new Animated.Value(1));
@@ -392,6 +432,16 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
   const challengeIndex = parseInt(today.replace(/-/g, ''), 10) % DAILY_CHALLENGES.length;
   const todayChallenge = DAILY_CHALLENGES[challengeIndex];
 
+  // Auto-detect mood when text changes
+  useEffect(() => {
+    if (textNote.length > 10) {
+      const detected = analyzeMoodFromText(textNote);
+      setAutoDetectedMood(detected);
+    } else {
+      setAutoDetectedMood(null);
+    }
+  }, [textNote]);
+
   const startBounce = () => {
     Animated.sequence([
       Animated.timing(bounceAnim, { toValue: 0.95, duration: 100, useNativeDriver: true }),
@@ -399,7 +449,7 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
     ]).start();
   };
 
-  // TTS - Speak text
+  // TTS
   const speakText = async (text: string) => {
     if (isSpeaking) {
       await Speech.stop();
@@ -408,33 +458,24 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
       setIsSpeaking(true);
       Speech.speak(text, {
         language: lang === 'fr' ? 'fr-FR' : 'en-US',
-        pitch: 1.0,
-        rate: 0.9,
+        pitch: 1.0, rate: 0.9,
         onDone: () => setIsSpeaking(false),
         onStopped: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
       });
     }
   };
 
-  // Play voice recording
+  // Voice playback
   const playVoiceNote = async (uri: string) => {
     try {
-      if (sound) {
-        await sound.unloadAsync();
-      }
+      if (sound) await sound.unloadAsync();
       const { sound: newSound } = await Audio.Sound.createAsync({ uri });
       setSound(newSound);
       await newSound.playAsync();
       newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setSound(null);
-        }
+        if (status.isLoaded && status.didJustFinish) setSound(null);
       });
-    } catch (e) {
-      console.log('Playback error', e);
-      Alert.alert(lang === 'fr' ? 'Erreur' : 'Error', lang === 'fr' ? 'Impossible de lire l\'audio' : 'Cannot play audio');
-    }
+    } catch (e) { console.log('Playback error', e); }
   };
 
   const startRecording = async () => {
@@ -446,9 +487,7 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
       setRecordingDuration(0);
       startBounce();
       timerRef.current = setInterval(() => setRecordingDuration(d => d + 1), 1000);
-    } catch (e) {
-      console.log('Recording error', e);
-    }
+    } catch (e) { console.log('Recording error', e); }
   };
 
   const stopRecording = async () => {
@@ -458,21 +497,21 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-      if (uri) {
-        await saveEntry('voice', uri, recordingDuration);
-      }
+      if (uri) await saveEntry('voice', uri, recordingDuration);
       setRecording(null);
     }
   };
 
   const saveEntry = async (type: 'voice' | 'text', content: string, duration?: number) => {
-    const today = new Date().toISOString().split('T')[0];
+    // Use auto-detected mood if available, otherwise use selected mood
+    const finalMood = autoDetectedMood || mood;
+    
     const newEntry: Entry = {
       id: Date.now().toString(),
       type,
       content,
       duration,
-      mood,
+      mood: finalMood,
       date: today,
       tags: [],
       createdAt: new Date().toISOString(),
@@ -483,6 +522,7 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
     setTextNote('');
     setRecordingDuration(0);
     setMood(3);
+    setAutoDetectedMood(null);
     Alert.alert(t.saved, t.yourEchoRecorded);
   };
 
@@ -493,11 +533,8 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
         <Text style={styles.recordTitle}>{t.newEcho}</Text>
 
         <GlassCard style={styles.challengeCard} onPress={() => {
-            if (todayChallenge.premium && !isPremium) {
-              Alert.alert(t.premium, t.upgradeToAccess);
-            } else {
-              setShowChallenge(!showChallenge);
-            }
+            if (todayChallenge.premium && !isPremium) Alert.alert(t.premium, t.upgradeToAccess);
+            else setShowChallenge(!showChallenge);
           }}>
           <View style={styles.challengeHeader}>
             <Icons.target color={todayChallenge.premium && !isPremium ? colors.gold : colors.accent} size={20} />
@@ -531,6 +568,7 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
           </TouchableOpacity>
         </View>
 
+        {/* Mood Selection */}
         <View style={styles.moodSection}>
           <Text style={styles.moodLabel}>{t.howFeel}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.emotionCardsContainer}>
@@ -538,6 +576,16 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
               <EmotionCard key={emotion.id} emotion={emotion} selected={mood === emotion.id} onPress={() => setMood(emotion.id)} lang={lang} />
             ))}
           </ScrollView>
+          
+          {/* Auto-detected mood */}
+          {autoDetectedMood && (
+            <View style={styles.autoMoodContainer}>
+              <Icons.brain color={colors.ai} size={16} />
+              <Text style={styles.autoMoodText}>
+                {t.estimatedMood}: {getMoodLabel(autoDetectedMood, lang)} ({autoDetectedMood}/5)
+              </Text>
+            </View>
+          )}
         </View>
 
         {mode === 'voice' ? (
@@ -580,83 +628,85 @@ function RecordScreen({ entries, setEntries, isPremium, lang }: any) {
   );
 }
 
-// ====== INSIGHTS SCREEN - WITH REAL AI ======
+// ====== INSIGHTS SCREEN ======
 function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPremium: boolean, lang: 'en' | 'fr' }) {
   const t = translations[lang];
-  const [analyzing, setAnalyzing] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysis | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [playingEntryId, setPlayingEntryId] = useState<string | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
 
-  // Generate AI analysis
   const runAIAnalysis = async () => {
     if (!isPremium) {
       Alert.alert(t.premium, lang === 'fr' ? 'Débloquez Premium pour l\'analyse IA complète!' : 'Unlock Premium for full AI analysis!');
       return;
     }
     
-    setAnalyzing(true);
-    // Simulate AI processing time
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    const analysis = generateAIAnalysis(entries, lang);
+    // Generate analysis
+    const textEntries = entries.filter(e => e.type === 'text');
+    const allText = textEntries.map(e => e.content).join(' ').toLowerCase();
+    const moods = entries.map(e => e.mood);
+    const avgMood = moods.length > 0 ? moods.reduce((a, b) => a + b, 0) / moods.length : 3;
+    
+    const positiveWords = ['happy', 'grateful', 'love', 'good', 'great', 'amazing', 'thank', 'blessed', 'joy', 'heureux', 'merci', 'aimé', 'bien', 'super'];
+    const negativeWords = ['sad', 'angry', 'fear', 'anxious', 'worried', 'stress', 'tired', 'frustrated', 'triste', 'colère', 'peur', 'stress', 'fatigué'];
+    
+    const positiveCount = positiveWords.filter(w => allText.includes(w)).length;
+    const negativeCount = negativeWords.filter(w => allText.includes(w)).length;
+    
+    const sentiment = positiveCount > negativeCount ? (lang === 'fr' ? 'Positif' : 'Positive') : 
+                     negativeCount > positiveCount ? (lang === 'fr' ? 'Négatif' : 'Negative') : 
+                     (lang === 'fr' ? 'Neutre' : 'Neutral');
+    
+    const summary = lang === 'fr' 
+      ? `Tu as ${entries.length} échos. Humeur moyenne: ${avgMood.toFixed(1)}/5. Sentiment: ${sentiment.toLowerCase()}.`
+      : `You have ${entries.length} echoes. Average mood: ${avgMood.toFixed(1)}/5. Sentiment: ${sentiment.toLowerCase()}.`;
+    
+    const advice = [];
+    if (negativeCount > positiveCount) advice.push(lang === 'fr' ? '🧘 Méditation recommandée' : '🧘 Meditation recommended');
+    if (entries.length < 5) advice.push(lang === 'fr' ? '📝 Note plus souvent' : '📝 Journal more often');
+    advice.push(lang === 'fr' ? '💪 Continue à t\'exprimer' : '💪 Keep expressing yourself');
+    
+    const analysis = { summary, sentiment, advice, avgMood: avgMood.toFixed(1), trend: avgMood >= 3 ? '📈' : '📉' };
     setAiAnalysis(analysis);
-    setAnalyzing(false);
   };
 
-  // TTS for AI summary
   const speakAnalysis = async () => {
     if (!aiAnalysis) return;
-    
-    if (isSpeaking) {
-      await Speech.stop();
-      setIsSpeaking(false);
-    } else {
+    if (isSpeaking) { await Speech.stop(); setIsSpeaking(false); }
+    else {
       setIsSpeaking(true);
-      const text = `${aiAnalysis.summary}. ${aiAnalysis.advice.join(' ')}`;
-      Speech.speak(text, {
+      Speech.speak(`${aiAnalysis.summary}. ${aiAnalysis.advice.join('. ')}`, {
         language: lang === 'fr' ? 'fr-FR' : 'en-US',
-        pitch: 1.0,
-        rate: 0.85,
         onDone: () => setIsSpeaking(false),
         onStopped: () => setIsSpeaking(false),
       });
     }
   };
 
-  // Play voice entry
   const playVoiceEntry = async (entry: Entry) => {
     if (entry.type !== 'voice') return;
-    
     try {
-      if (sound) {
-        await sound.unloadAsync();
-      }
+      if (sound) await sound.unloadAsync();
       setPlayingEntryId(entry.id);
       const { sound: newSound } = await Audio.Sound.createAsync({ uri: entry.content });
       setSound(newSound);
       await newSound.playAsync();
       newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setPlayingEntryId(null);
-          setSound(null);
-        }
+        if (status.isLoaded && status.didJustFinish) { setPlayingEntryId(null); setSound(null); }
       });
-    } catch (e) {
-      console.log('Playback error', e);
-    }
+    } catch (e) { console.log('Playback error', e); }
   };
 
-  // Generate basic stats
-  const insights: Insight[] = [];
+  const insights = [];
   const totalVoice = entries.filter(e => e.type === 'voice').length;
   const totalText = entries.filter(e => e.type === 'text').length;
   const avgMood = entries.length > 0 ? (entries.reduce((a, b) => a + b.mood, 0) / entries.length).toFixed(1) : '0';
   
   if (entries.length > 0) {
-    insights.push({ label: lang === 'fr' ? 'Voix' : 'Voice', value: `${Math.round((totalVoice / (totalVoice + totalText || 1)) * 100)}%`, change: 12 });
-    insights.push({ label: lang === 'fr' ? 'Humeur' : 'Mood', value: avgMood, change: 5 });
-    insights.push({ label: lang === 'fr' ? 'Total' : 'Total', value: `${entries.length}`, change: 0 });
+    insights.push({ label: lang === 'fr' ? 'Voix' : 'Voice', value: `${Math.round((totalVoice / (totalVoice + totalText || 1)) * 100)}%` });
+    insights.push({ label: lang === 'fr' ? 'Humeur' : 'Mood', value: avgMood });
+    insights.push({ label: lang === 'fr' ? 'Total' : 'Total', value: `${entries.length}` });
   }
 
   return (
@@ -672,17 +722,14 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
           </GlassCard>
         ) : (
           <>
-            {/* AI Analysis Button - PREMIUM */}
             {isPremium ? (
               <GlassCard style={styles.aiCard} onPress={runAIAnalysis}>
                 <LinearGradient colors={colors.aiGradient} style={styles.aiCardGradient}>
                   <View style={styles.aiCardContent}>
                     <Icons.brain color={colors.text} size={28} />
                     <View style={styles.aiCardText}>
-                      <Text style={styles.aiCardTitle}>{analyzing ? t.analyzing : t.aiAnalysis}</Text>
-                      <Text style={styles.aiCardSubtitle}>
-                        {analyzing ? (lang === 'fr' ? 'Analyse en cours...' : 'Analyzing your data...') : (lang === 'fr' ? 'Obtiens des conseils personnalisés' : 'Get personalized insights')}
-                      </Text>
+                      <Text style={styles.aiCardTitle}>{t.aiAnalysis}</Text>
+                      <Text style={styles.aiCardSubtitle}>{lang === 'fr' ? 'Obtiens des conseils personnalisés' : 'Get personalized insights'}</Text>
                     </View>
                   </View>
                 </LinearGradient>
@@ -692,12 +739,10 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
                 <View style={styles.lockedContent}>
                   <Icons.lock color={colors.gold} size={28} />
                   <Text style={styles.lockedTitle}>{t.lockedUnlock}</Text>
-                  <Text style={styles.lockedSubtitle}>{lang === 'fr' ? 'Analyse IA avec conseils' : 'AI analysis with advice'}</Text>
                 </View>
               </GlassCard>
             )}
 
-            {/* AI Analysis Results */}
             {aiAnalysis && (
               <GlassCard style={styles.aiResultCard}>
                 <View style={styles.aiResultHeader}>
@@ -706,38 +751,14 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
                     {isSpeaking ? <Icons.stop color={colors.accent} size={18} /> : <Icons.play color={colors.accent} size={18} />}
                   </TouchableOpacity>
                 </View>
-                
-                <View style={styles.aiResultSection}>
-                  <Text style={styles.aiResultLabel}>{t.summary}</Text>
-                  <Text style={styles.aiResultText}>{aiAnalysis.summary}</Text>
-                </View>
-                
-                <View style={styles.aiResultSection}>
-                  <Text style={styles.aiResultLabel}>{lang === 'fr' ? 'Tendance' : 'Trend'}</Text>
-                  <Text style={styles.aiResultTrend}>{aiAnalysis.moodTrend}</Text>
-                </View>
-                
-                <View style={styles.aiResultSection}>
-                  <Text style={styles.aiResultLabel}>{t.advice}</Text>
-                  {aiAnalysis.advice.map((tip, i) => (
-                    <Text key={i} style={styles.aiAdviceText}>{tip}</Text>
-                  ))}
-                </View>
-                
-                {aiAnalysis.keywords.length > 0 && (
-                  <View style={styles.aiResultSection}>
-                    <Text style={styles.aiResultLabel}>{t.keywords}</Text>
-                    <View style={styles.keywordTags}>
-                      {aiAnalysis.keywords.map((kw, i) => (
-                        <View key={i} style={styles.keywordTag}><Text style={styles.keywordTagText}>{kw}</Text></View>
-                      ))}
-                    </View>
-                  </View>
-                )}
+                <Text style={styles.aiResultText}>{aiAnalysis.summary}</Text>
+                <Text style={styles.aiResultTrend}>{aiAnalysis.trend} {aiAnalysis.sentiment}</Text>
+                {aiAnalysis.advice.map((tip: string, i: number) => (
+                  <Text key={i} style={styles.aiAdviceText}>{tip}</Text>
+                ))}
               </GlassCard>
             )}
 
-            {/* Basic Stats */}
             <View style={styles.statsGrid}>
               {insights.map((insight, i) => (
                 <GlassCard key={i} style={styles.insightCard}>
@@ -747,7 +768,6 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
               ))}
             </View>
 
-            {/* Voice Entries with Play Button */}
             {entries.filter(e => e.type === 'voice').length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>{lang === 'fr' ? 'Notes Vocales' : 'Voice Notes'}</Text>
@@ -761,14 +781,10 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
                             <View style={[styles.voiceBar, styles.voiceBar2]} />
                             <View style={[styles.voiceBar, styles.voiceBar3]} />
                           </View>
-                        ) : (
-                          <Icons.play color={colors.accent} size={20} />
-                        )}
+                        ) : <Icons.play color={colors.accent} size={20} />}
                       </View>
                       <View style={styles.voiceEntryInfo}>
-                        <Text style={styles.voiceEntryDuration}>
-                          {`${Math.floor((entry.duration || 0) / 60)}:${String(Math.floor((entry.duration || 0) % 60)).padStart(2, '0')}`}
-                        </Text>
+                        <Text style={styles.voiceEntryDuration}>{`${Math.floor((entry.duration || 0) / 60)}:${String(Math.floor((entry.duration || 0) % 60)).padStart(2, '0')}`}</Text>
                         <Text style={styles.voiceEntryDate}>{entry.date}</Text>
                       </View>
                     </View>
@@ -777,14 +793,10 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
               </>
             )}
 
-            {/* Premium CTA */}
             {!isPremium && (
               <GlassCard style={styles.premiumCard}>
                 <Text style={styles.premiumTitle}>{t.premiumTitle}</Text>
                 <Text style={styles.premiumText}>{t.premiumText}</Text>
-                <TouchableOpacity style={styles.premiumButton} onPress={() => Alert.alert('Coming Soon', 'Subscription coming soon!')}>
-                  <Text style={styles.premiumButtonText}>{t.upgrade}</Text>
-                </TouchableOpacity>
               </GlassCard>
             )}
           </>
@@ -795,7 +807,7 @@ function InsightsScreen({ entries, isPremium, lang }: { entries: Entry[], isPrem
 }
 
 // ====== SETTINGS SCREEN ======
-function SettingsScreen({ isPremium, setIsPremium, lang, setLang }: { isPremium: boolean, setIsPremium: (v: boolean) => void, lang: 'en' | 'fr', setLang: (v: 'en' | 'fr') => void }) {
+function SettingsScreen({ isPremium, setIsPremium, lang, setLang, user, onLogout }: any) {
   const t = translations[lang];
   const [dailyReminder, setDailyReminder] = useState(false);
 
@@ -805,8 +817,29 @@ function SettingsScreen({ isPremium, setIsPremium, lang, setLang }: { isPremium:
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.settingsTitle}>{t.settings}</Text>
 
+        {/* User Info */}
+        {user && (
+          <View style={styles.settingsSection}>
+            <Text style={styles.settingsLabel}>{t.account}</Text>
+            <GlassCard>
+              <View style={styles.userInfoRow}>
+                <View style={styles.userAvatar}>
+                  <Icons.user color={colors.accent} size={24} />
+                </View>
+                <View style={styles.userInfo}>
+                  <Text style={styles.userInfoName}>{user.name}</Text>
+                  <Text style={styles.userInfoEmail}>{user.email}</Text>
+                </View>
+              </View>
+              <TouchableOpacity style={styles.logoutButton} onPress={onLogout}>
+                <Text style={styles.logoutButtonText}>{t.logout}</Text>
+              </TouchableOpacity>
+            </GlassCard>
+          </View>
+        )}
+
         <View style={styles.settingsSection}>
-          <Text style={styles.settingsLabel}>{t.account}</Text>
+          <Text style={styles.settingsLabel}>{t.echoPremium}</Text>
           <GlassCard>
             <View style={styles.settingsRow}>
               <Text style={styles.settingsRowText}>{t.echoPremium}</Text>
@@ -818,7 +851,7 @@ function SettingsScreen({ isPremium, setIsPremium, lang, setLang }: { isPremium:
             </View>
             <View style={[styles.settingsRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.settingsRowText}>{t.storage}</Text>
-              <Text style={styles.settingsRowValue}>2.3 MB</Text>
+              <Text style={styles.settingsRowValue}>{entries.length > 0 ? `${(JSON.stringify(entries).length / 1024).toFixed(1)} KB` : '0 KB'}</Text>
             </View>
           </GlassCard>
         </View>
@@ -851,20 +884,16 @@ function SettingsScreen({ isPremium, setIsPremium, lang, setLang }: { isPremium:
           </GlassCard>
         </View>
 
-        {/* TEST PREMIUM BUTTON */}
         <TouchableOpacity style={[styles.upgradeButton, isPremium && styles.testPremiumButton]} onPress={() => {
             setIsPremium(!isPremium);
             Alert.alert(isPremium ? (lang === 'fr' ? 'Premium Désactivé' : 'Premium Disabled') : t.premiumActivated, 
-              isPremium ? (lang === 'fr' ? 'Vous êtes maintenant en version gratuite' : 'You are now on Free plan') : 
-              (lang === 'fr' ? 'Bienvenue dans Echo Premium!' : 'Welcome to Echo Premium!'));
+              isPremium ? (lang === 'fr' ? 'Vous êtes maintenant en version gratuite' : 'You are now on Free plan') : (lang === 'fr' ? 'Bienvenue dans Echo Premium!' : 'Welcome to Echo Premium!'));
           }}>
-          <Text style={styles.upgradeButtonText}>
-            {isPremium ? t.disablePremium : t.testPremium}
-          </Text>
+          <Text style={styles.upgradeButtonText}>{isPremium ? t.disablePremium : t.testPremium}</Text>
         </TouchableOpacity>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Echo V4 • AI Powered</Text>
+          <Text style={styles.footerText}>Echo V5 • AI + Auth</Text>
         </View>
       </ScrollView>
     </View>
@@ -879,12 +908,20 @@ export default function App() {
   const [isPremium, setIsPremium] = useState(false);
   const [lastEntryDate, setLastEntryDate] = useState<string | null>(null);
   const [lang, setLang] = useState<'en' | 'fr'>('en');
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       try {
+        // Load user
+        const savedUser = await AsyncStorage.getItem('currentUser');
+        if (savedUser) setUser(JSON.parse(savedUser));
+        
+        // Load entries
         const saved = await AsyncStorage.getItem('entries');
         if (saved) setEntries(JSON.parse(saved));
+        
+        // Load other settings
         const savedStreak = await AsyncStorage.getItem('streak');
         if (savedStreak) setStreak(parseInt(savedStreak, 10));
         const savedLastDate = await AsyncStorage.getItem('lastEntryDate');
@@ -910,7 +947,7 @@ export default function App() {
       const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
       const hasYesterday = entries.some(e => e.date === yesterday);
       let newStreak = 1;
-      if (hasYesterday && lastEntryDate === yesterday) { newStreak = streak + 1; }
+      if (hasYesterday && lastEntryDate === yesterday) newStreak = streak + 1;
       setStreak(newStreak);
       setLastEntryDate(today);
       AsyncStorage.setItem('streak', newStreak.toString());
@@ -919,8 +956,16 @@ export default function App() {
   }, [entries, isLoaded]);
 
   useEffect(() => {
-    if (isLoaded) { AsyncStorage.setItem('isPremium', JSON.stringify(isPremium)); AsyncStorage.setItem('lang', lang); }
+    if (isLoaded) {
+      AsyncStorage.setItem('isPremium', JSON.stringify(isPremium));
+      AsyncStorage.setItem('lang', lang);
+    }
   }, [isPremium, lang, isLoaded]);
+
+  const handleLogout = async () => {
+    await AsyncStorage.removeItem('currentUser');
+    setUser(null);
+  };
 
   const t = translations[lang];
   const today = new Date().toISOString().split('T')[0];
@@ -928,11 +973,16 @@ export default function App() {
 
   if (!isLoaded) return null;
 
+  // Show auth screen if not logged in
+  if (!user) {
+    return <AuthScreen onLogin={setUser} lang={lang} />;
+  }
+
   return (
     <NavigationContainer>
       <Tab.Navigator screenOptions={{ headerShown: false, tabBarStyle: styles.tabBar, tabBarActiveTintColor: colors.accent, tabBarInactiveTintColor: colors.textTertiary, tabBarLabelStyle: styles.tabBarLabel }}>
         <Tab.Screen name="Home" options={{ tabBarIcon: ({ color }) => <Icons.home color={color} size={22} />, tabBarLabel: t.home }}>
-          {() => <HomeScreen entries={entries} todayEntries={todayEntries} streak={streak} isPremium={isPremium} lang={lang} />}
+          {() => <HomeScreen entries={entries} todayEntries={todayEntries} streak={streak} isPremium={isPremium} lang={lang} user={user} />}
         </Tab.Screen>
         <Tab.Screen name="Record" options={{ tabBarIcon: ({ color }) => <Icons.mic color={color} size={22} />, tabBarLabel: t.record }}>
           {() => <RecordScreen entries={entries} setEntries={setEntries} isPremium={isPremium} lang={lang} />}
@@ -941,7 +991,7 @@ export default function App() {
           {() => <InsightsScreen entries={entries} isPremium={isPremium} lang={lang} />}
         </Tab.Screen>
         <Tab.Screen name="Settings" options={{ tabBarIcon: ({ color }) => <Icons.settings color={color} size={22} />, tabBarLabel: t.settings }}>
-          {() => <SettingsScreen isPremium={isPremium} setIsPremium={setIsPremium} lang={lang} setLang={setLang} />}
+          {() => <SettingsScreen isPremium={isPremium} setIsPremium={setIsPremium} lang={lang} setLang={setLang} user={user} onLogout={handleLogout} />}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>
@@ -951,11 +1001,24 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   scrollContent: { padding: 20, paddingTop: 60 },
+  authContent: { padding: 20, paddingTop: 100, flex: 1, justifyContent: 'center' },
+  authHeader: { alignItems: 'center', marginBottom: 40 },
+  authLogo: { fontSize: 52, fontWeight: '700', color: colors.text, letterSpacing: -2 },
+  authSubtitle: { fontSize: 16, color: colors.textSecondary, marginTop: 8 },
+  authCard: { padding: 24 },
+  authInput: { backgroundColor: colors.glass, borderRadius: 12, padding: 16, color: colors.text, fontSize: 15, marginBottom: 12, borderWidth: 0.5, borderColor: colors.glassBorder },
+  authButton: { marginTop: 8 },
+  authButtonGradient: { padding: 16, borderRadius: 12, alignItems: 'center' },
+  authButtonText: { fontSize: 16, fontWeight: '600', color: colors.text },
+  authSwitch: { alignItems: 'center', marginTop: 20 },
+  authSwitchText: { fontSize: 14, color: colors.textSecondary },
+  
   glassCard: { backgroundColor: colors.glass, borderRadius: 20, borderWidth: 0.5, borderColor: colors.glassBorder, padding: 16, marginBottom: 12 },
   glassCardPressed: { backgroundColor: colors.glassHover, transform: [{ scale: 0.98 }] },
   
   header: { marginBottom: 24 },
   logo: { fontSize: 42, fontWeight: '700', color: colors.text, letterSpacing: -1.5 },
+  userName: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4, letterSpacing: 0.5 },
   
   streakCard: { marginBottom: 20, padding: 0, overflow: 'hidden' },
@@ -1021,6 +1084,9 @@ const styles = StyleSheet.create({
   emotionIconText: { fontSize: 18, color: colors.text },
   emotionLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '500' },
   
+  autoMoodContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 12, padding: 12, backgroundColor: 'rgba(168,85,247,0.15)', borderRadius: 12 },
+  autoMoodText: { fontSize: 13, color: colors.ai, marginLeft: 8 },
+  
   recorderSection: { alignItems: 'center', paddingVertical: 20 },
   recordButton: { width: 180, height: 180, borderRadius: 90, overflow: 'hidden' },
   recordButtonActive: { transform: [{ scale: 0.95 }] },
@@ -1039,7 +1105,6 @@ const styles = StyleSheet.create({
   insightLabel: { fontSize: 11, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   insightValue: { fontSize: 22, fontWeight: '700', color: colors.text },
   
-  // AI Card Styles
   aiCard: { padding: 0, marginBottom: 20, overflow: 'hidden' },
   aiCardGradient: { padding: 20 },
   aiCardContent: { flexDirection: 'row', alignItems: 'center' },
@@ -1047,23 +1112,14 @@ const styles = StyleSheet.create({
   aiCardTitle: { fontSize: 18, fontWeight: '700', color: colors.text },
   aiCardSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
   
-  // AI Result Card
   aiResultCard: { marginBottom: 20, borderWidth: 1, borderColor: colors.ai },
   aiResultHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   aiResultTitle: { fontSize: 18, fontWeight: '700', color: colors.ai },
   aiSpeakButton: { padding: 8, backgroundColor: 'rgba(0,122,255,0.1)', borderRadius: 20 },
-  
-  aiResultSection: { marginBottom: 16 },
-  aiResultLabel: { fontSize: 11, color: colors.textTertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   aiResultText: { fontSize: 15, color: colors.text, lineHeight: 22 },
-  aiResultTrend: { fontSize: 16, fontWeight: '600', color: colors.success },
-  aiAdviceText: { fontSize: 14, color: colors.text, lineHeight: 22, marginBottom: 8 },
+  aiResultTrend: { fontSize: 16, fontWeight: '600', color: colors.success, marginTop: 8 },
+  aiAdviceText: { fontSize: 14, color: colors.text, lineHeight: 22, marginTop: 8 },
   
-  keywordTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  keywordTag: { backgroundColor: colors.glass, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  keywordTagText: { fontSize: 12, color: colors.textSecondary },
-  
-  // Voice Entry
   voiceEntryCard: { marginBottom: 10 },
   voiceEntryContent: { flexDirection: 'row', alignItems: 'center' },
   voicePlayButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,122,255,0.15)', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
@@ -1077,14 +1133,10 @@ const styles = StyleSheet.create({
   lockedCard: { padding: 24 },
   lockedContent: { alignItems: 'center' },
   lockedTitle: { fontSize: 17, fontWeight: '600', color: colors.text, marginTop: 12 },
-  lockedSubtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
-  premiumButtonV3: { marginTop: 16, backgroundColor: 'rgba(255,214,10,0.15)', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
-  premiumButtonText: { fontSize: 13, fontWeight: '600', color: colors.gold },
   
   premiumCard: { marginTop: 10, backgroundColor: 'rgba(0,122,255,0.1)', borderColor: colors.accent },
   premiumTitle: { fontSize: 17, fontWeight: '600', color: colors.text, marginBottom: 8 },
   premiumText: { fontSize: 13, color: colors.textSecondary, lineHeight: 18 },
-  premiumButton: { backgroundColor: colors.accent, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 14 },
   
   settingsTitle: { fontSize: 34, fontWeight: '700', color: colors.text, marginBottom: 24, letterSpacing: -0.5 },
   settingsSection: { marginBottom: 24 },
@@ -1092,6 +1144,14 @@ const styles = StyleSheet.create({
   settingsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   settingsRowText: { fontSize: 15, color: colors.text },
   settingsRowValue: { fontSize: 15, color: colors.textSecondary },
+  
+  userInfoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  userAvatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(0,122,255,0.15)', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  userInfo: { flex: 1 },
+  userInfoName: { fontSize: 17, fontWeight: '600', color: colors.text },
+  userInfoEmail: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  logoutButton: { backgroundColor: 'rgba(255,69,58,0.15)', borderRadius: 10, padding: 12, alignItems: 'center' },
+  logoutButtonText: { fontSize: 14, fontWeight: '600', color: colors.danger },
   
   languageRow: { flexDirection: 'row', gap: 10 },
   langButton: { flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 12, backgroundColor: colors.glass, borderWidth: 1, borderColor: 'transparent' },
