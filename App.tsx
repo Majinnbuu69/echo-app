@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, StatusBar } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, Animated, Dimensions, Platform, StatusBar, Switch } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,7 +11,7 @@ const { width, height } = Dimensions.get('window');
 type Entry = {
   id: string;
   type: 'voice' | 'text';
-  content: string; // text or base64 audio uri
+  content: string;
   duration?: number;
   mood: number;
   date: string;
@@ -22,8 +22,20 @@ type Entry = {
 type Insight = {
   label: string;
   value: string;
-  change: number; // percentage
+  change: number;
 };
+
+// Daily challenges pool
+const DAILY_CHALLENGES = [
+  { id: 1, text: "What's one thing you're grateful for today?", premium: false },
+  { id: 2, text: "Describe your perfect morning routine.", premium: false },
+  { id: 3, text: "What's a fear you want to overcome?", premium: false },
+  { id: 4, text: "If you could tell your younger self one thing...", premium: true },
+  { id: 5, text: "What's the best advice you've ever received?", premium: false },
+  { id: 6, text: "Describe a moment that made you smile today.", premium: false },
+  { id: 7, text: "What's one goal you're working toward right now?", premium: false },
+  { id: 8, text: "If you could change one thing about today, what would it be?", premium: true },
+];
 
 const Tab = createBottomTabNavigator();
 
@@ -41,20 +53,33 @@ const colors = {
   warning: '#FF9F0A',
   danger: '#FF453A',
   gradient: ['#1c1c1e', '#2c2c2e', '#1c1c1e'],
+  fire: '#FF9500',
 };
 
 // ====== HOME SCREEN ======
-function HomeScreen({ entries, todayEntries }: { entries: Entry[], todayEntries: Entry[] }) {
+function HomeScreen({ entries, todayEntries, streak, isPremium }: { entries: Entry[], todayEntries: Entry[], streak: number, isPremium: boolean }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fireAnim = useRef(new Animated.Value(1)).current;
   
   useEffect(() => {
+    // Pulse animation for today's circle
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.05, duration: 2000, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
       ])
     ).start();
-  }, []);
+
+    // Fire animation when streak is active
+    if (streak > 0) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(fireAnim, { toValue: 1.2, duration: 500, useNativeDriver: true }),
+          Animated.timing(fireAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+        ])
+      ).start();
+    }
+  }, [streak]);
 
   const getMoodEmoji = (m: number) => ['😔', '😕', '😐', '🙂', '😊'][m-1] || '😐';
   const getMoodColor = (m: number) => [colors.danger, colors.warning, colors.textSecondary, colors.success, colors.accent][m-1] || colors.textSecondary;
@@ -72,6 +97,35 @@ function HomeScreen({ entries, todayEntries }: { entries: Entry[], todayEntries:
           <Text style={styles.logo}>Echo</Text>
           <Text style={styles.subtitle}>Your voice, your time</Text>
         </View>
+
+        {/* Streak Card */}
+        {streak > 0 && (
+          <Animated.View style={[styles.streakCard, { transform: [{ scale: fireAnim }] }]}>
+            <LinearGradient 
+              colors={[colors.fire, '#FF6B00']} 
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.streakGradient}
+            >
+              <Text style={styles.streakEmoji}>🔥</Text>
+              <Text style={styles.streakValue}>{streak}</Text>
+              <Text style={styles.streakLabel}>day streak</Text>
+              {streak >= 7 && (
+                <View style={styles.streakBadge}>
+                  <Text style={styles.streakBadgeText}>🌟 7+</Text>
+                </View>
+              )}
+            </LinearGradient>
+          </Animated.View>
+        )}
+
+        {streak === 0 && (
+          <View style={styles.streakEmptyCard}>
+            <Text style={styles.streakEmptyEmoji}>💫</Text>
+            <Text style={styles.streakEmptyText}>Start your streak today!</Text>
+            <Text style={styles.streakEmptySubtext}>Record your first echo to begin</Text>
+          </View>
+        )}
 
         {/* Today's Circle */}
         <View style={styles.todayCard}>
@@ -101,8 +155,8 @@ function HomeScreen({ entries, todayEntries }: { entries: Entry[], todayEntries:
             <Text style={styles.statLabel}>Text</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{Math.max(0, 14 - Math.floor((Date.now() - (entries[0]?.createdAt ? new Date(entries[0].createdAt).getTime() : Date.now())) / 86400000))}</Text>
-            <Text style={styles.statLabel}>Days left</Text>
+            <Text style={styles.statValue}>{streak}</Text>
+            <Text style={styles.statLabel}>Streak 🔥</Text>
           </View>
         </View>
 
@@ -133,14 +187,20 @@ function HomeScreen({ entries, todayEntries }: { entries: Entry[], todayEntries:
 }
 
 // ====== RECORD SCREEN ======
-function RecordScreen({ entries, setEntries, navigation }: any) {
+function RecordScreen({ entries, setEntries, isPremium, setIsPremium }: any) {
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [textNote, setTextNote] = useState('');
   const [mode, setMode] = useState<'voice' | 'text'>('voice');
   const [mood, setMood] = useState(3);
+  const [showChallenge, setShowChallenge] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get today's challenge
+  const today = new Date().toISOString().split('T')[0];
+  const challengeIndex = parseInt(today.replace(/-/g, ''), 10) % DAILY_CHALLENGES.length;
+  const todayChallenge = DAILY_CHALLENGES[challengeIndex];
 
   const startRecording = async () => {
     try {
@@ -191,7 +251,6 @@ function RecordScreen({ entries, setEntries, navigation }: any) {
     setEntries(updated);
     await AsyncStorage.setItem('entries', JSON.stringify(updated));
     
-    // Reset
     setTextNote('');
     setRecordingDuration(0);
     setMood(3);
@@ -204,6 +263,58 @@ function RecordScreen({ entries, setEntries, navigation }: any) {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.recordTitle}>New Echo</Text>
+
+        {/* Daily Challenge Card */}
+        <TouchableOpacity 
+          style={styles.challengeCard}
+          onPress={() => {
+            if (todayChallenge.premium && !isPremium) {
+              Alert.alert('🔓 Premium', 'Upgrade to access premium daily challenges!');
+            } else {
+              setShowChallenge(!showChallenge);
+            }
+          }}
+        >
+          <LinearGradient 
+            colors={todayChallenge.premium && !isPremium ? ['rgba(255,149,0,0.2)', 'rgba(255,100,0,0.1)'] : ['rgba(10,132,255,0.2)', 'rgba(94,92,230,0.1)']}
+            style={styles.challengeGradient}
+          >
+            <View style={styles.challengeHeader}>
+              <Text style={styles.challengeEmoji}>🎯</Text>
+              <Text style={styles.challengeLabel}>Daily Challenge</Text>
+              {todayChallenge.premium && <Text style={styles.premiumBadge}>⭐ Premium</Text>}
+            </View>
+            <Text style={styles.challengeText}>{todayChallenge.text}</Text>
+            <Text style={styles.challengeHint}>Tap to answer →</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {showChallenge && (
+          <View style={styles.challengeAnswerSection}>
+            <TextInput
+              style={styles.textInput}
+              value={textNote}
+              onChangeText={setTextNote}
+              placeholder="Your answer..."
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+            <TouchableOpacity 
+              style={[styles.saveButton, !textNote.trim() && styles.saveButtonDisabled]}
+              onPress={() => {
+                if (textNote.trim()) {
+                  saveEntry('text', `💫 Challenge: ${todayChallenge.text}\n\n${textNote.trim()}`);
+                  setShowChallenge(false);
+                }
+              }}
+              disabled={!textNote.trim()}
+            >
+              <Text style={styles.saveButtonText}>Submit Challenge</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Mode Toggle */}
         <View style={styles.modeToggle}>
@@ -284,7 +395,7 @@ function RecordScreen({ entries, setEntries, navigation }: any) {
 }
 
 // ====== INSIGHTS SCREEN ======
-function InsightsScreen({ entries }: { entries: Entry[] }) {
+function InsightsScreen({ entries, isPremium }: { entries: Entry[], isPremium: boolean }) {
   const insights: Insight[] = [];
   
   const totalVoice = entries.filter(e => e.type === 'voice').length;
@@ -293,7 +404,6 @@ function InsightsScreen({ entries }: { entries: Entry[] }) {
     ? (entries.reduce((a, b) => a + b.mood, 0) / entries.length).toFixed(1)
     : '0';
   
-  // Mock insights for demo
   if (entries.length > 0) {
     insights.push({ label: 'Voice vs Text', value: `${Math.round((totalVoice / (totalVoice + totalText || 1)) * 100)}% voice`, change: 12 });
     insights.push({ label: 'Avg Mood', value: avgMood, change: 5 });
@@ -303,6 +413,24 @@ function InsightsScreen({ entries }: { entries: Entry[] }) {
       return d > new Date(now.getTime() - 7 * 86400000);
     }).length} entries`, change: -2 });
   }
+
+  // Mood journey data for premium
+  const getMoodData = () => {
+    const last14Days: { date: string; avg: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayEntries = entries.filter(e => e.date === dateStr);
+      if (dayEntries.length > 0) {
+        const avg = dayEntries.reduce((a, b) => a + b.mood, 0) / dayEntries.length;
+        last14Days.push({ date: dateStr, avg });
+      }
+    }
+    return last14Days;
+  };
+
+  const moodData = getMoodData();
 
   return (
     <View style={styles.container}>
@@ -328,6 +456,38 @@ function InsightsScreen({ entries }: { entries: Entry[] }) {
               ))}
             </View>
 
+            {/* Mood Journey - Premium Feature */}
+            <Text style={styles.sectionTitle}>📈 Mood Journey</Text>
+            
+            {isPremium ? (
+              <View style={styles.moodJourneyCard}>
+                <View style={styles.moodJourneyGraph}>
+                  {moodData.length > 0 ? (
+                    <View style={styles.graphContainer}>
+                      {moodData.map((day, i) => {
+                        const height = (day.avg / 5) * 100;
+                        return (
+                          <View key={i} style={styles.graphBar}>
+                            <View style={[styles.graphBarInner, { height: `${height}%`, backgroundColor: day.avg >= 3 ? colors.success : colors.warning }]} />
+                            <Text style={styles.graphLabel}>{day.date.slice(5)}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.noDataText}>Not enough data yet</Text>
+                  )}
+                </View>
+                <Text style={styles.moodJourneyDesc}>Your mood over the last 14 days</Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.lockedJourneyCard} onPress={() => Alert.alert('🔓 Premium', 'Unlock your full mood journey!')}>
+                <Text style={styles.lockedJourneyEmoji}>🔒</Text>
+                <Text style={styles.lockedJourneyText}>Unlock Mood Journey</Text>
+                <Text style={styles.lockedJourneySubtext}>See your mood patterns over time</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Premium Card */}
             <View style={styles.premiumCard}>
               <Text style={styles.premiumTitle}>🔓 Full Insights</Text>
@@ -344,8 +504,8 @@ function InsightsScreen({ entries }: { entries: Entry[] }) {
 }
 
 // ====== SETTINGS SCREEN ======
-function SettingsScreen() {
-  const [isPremium, setIsPremium] = useState(false);
+function SettingsScreen({ isPremium, setIsPremium }: { isPremium: boolean, setIsPremium: (v: boolean) => void }) {
+  const [dailyReminder, setDailyReminder] = useState(false);
 
   return (
     <View style={styles.container}>
@@ -357,7 +517,9 @@ function SettingsScreen() {
           <View style={styles.settingsCard}>
             <View style={styles.settingsRow}>
               <Text style={styles.settingsRowText}>Echo Premium</Text>
-              <Text style={styles.settingsRowValue}>{isPremium ? '✓ Active' : 'Free'}</Text>
+              <TouchableOpacity onPress={() => setIsPremium(!isPremium)}>
+                <Text style={[styles.settingsRowValue, isPremium && { color: colors.success }]}>{isPremium ? '✓ Active' : 'Free'}</Text>
+              </TouchableOpacity>
             </View>
             <View style={styles.settingsRow}>
               <Text style={styles.settingsRowText}>Storage Used</Text>
@@ -373,19 +535,33 @@ function SettingsScreen() {
               <Text style={styles.settingsRowText}>AI Insights</Text>
               <Text style={styles.settingsRowValue}>On</Text>
             </View>
-            <View style={styles.settingsRow}>
+            <View style={[styles.settingsRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.settingsRowText}>Daily Reminder</Text>
-              <Text style={styles.settingsRowValue}>Off</Text>
+              <Switch
+                value={dailyReminder}
+                onValueChange={setDailyReminder}
+                trackColor={{ false: colors.card, true: colors.accent }}
+                thumbColor={colors.text}
+              />
             </View>
           </View>
         </View>
 
-        <TouchableOpacity 
-          style={styles.upgradeButton}
-          onPress={() => Alert.alert('Coming Soon', 'Subscription will be available soon!')}
-        >
-          <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
-        </TouchableOpacity>
+        {!isPremium && (
+          <TouchableOpacity 
+            style={styles.upgradeButton}
+            onPress={() => {
+              setIsPremium(true);
+              Alert.alert('🎉 Premium Activated!', 'You now have full access to all features!');
+            }}
+          >
+            <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Echo v2.0 • Made with 💜</Text>
+        </View>
       </ScrollView>
     </View>
   );
@@ -395,12 +571,24 @@ function SettingsScreen() {
 export default function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [isPremium, setIsPremium] = useState(false);
+  const [lastEntryDate, setLastEntryDate] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         const saved = await AsyncStorage.getItem('entries');
         if (saved) setEntries(JSON.parse(saved));
+        
+        const savedStreak = await AsyncStorage.getItem('streak');
+        if (savedStreak) setStreak(parseInt(savedStreak, 10));
+        
+        const savedLastDate = await AsyncStorage.getItem('lastEntryDate');
+        if (savedLastDate) setLastEntryDate(savedLastDate);
+
+        const savedPremium = await AsyncStorage.getItem('isPremium');
+        if (savedPremium) setIsPremium(JSON.parse(savedPremium));
       } catch (e) {
         console.log('Load error', e);
       }
@@ -408,6 +596,66 @@ export default function App() {
     };
     loadData();
   }, []);
+
+  // Calculate and update streak
+  useEffect(() => {
+    if (!isLoaded || entries.length === 0) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    
+    // Get the most recent entry date
+    const sortedEntries = [...entries].sort((a, b) => 
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    const mostRecentDate = sortedEntries[0]?.date;
+
+    if (mostRecentDate === today && lastEntryDate !== today) {
+      // New entry today, check if streak continues
+      if (lastEntryDate === yesterday || lastEntryDate === today) {
+        // Streak continues or maintained
+      } else if (lastEntryDate) {
+        // Streak broken, reset
+        setStreak(1);
+      } else {
+        // First entry ever
+        setStreak(1);
+      }
+      setLastEntryDate(today);
+      AsyncStorage.setItem('streak', streak.toString());
+      AsyncStorage.setItem('lastEntryDate', today);
+    }
+  }, [entries, isLoaded]);
+
+  // Update streak when entries change
+  useEffect(() => {
+    if (entries.length === 0 || !isLoaded) return;
+    
+    const today = new Date().toISOString().split('T')[0];
+    const hasToday = entries.some(e => e.date === today);
+    
+    if (hasToday && lastEntryDate !== today) {
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      const hasYesterday = entries.some(e => e.date === yesterday);
+      
+      let newStreak = 1;
+      if (hasYesterday && lastEntryDate === yesterday) {
+        newStreak = streak + 1;
+      }
+      
+      setStreak(newStreak);
+      setLastEntryDate(today);
+      AsyncStorage.setItem('streak', newStreak.toString());
+      AsyncStorage.setItem('lastEntryDate', today);
+    }
+  }, [entries]);
+
+  // Save premium state
+  useEffect(() => {
+    if (isLoaded) {
+      AsyncStorage.setItem('isPremium', JSON.stringify(isPremium));
+    }
+  }, [isPremium, isLoaded]);
 
   const today = new Date().toISOString().split('T')[0];
   const todayEntries = entries.filter(e => e.date === today);
@@ -426,16 +674,16 @@ export default function App() {
         }}
       >
         <Tab.Screen name="Home" options={{ tabBarIcon: ({ color }) => <Text style={styles.tabIcon}>🏠</Text> }}>
-          {() => <HomeScreen entries={entries} todayEntries={todayEntries} />}
+          {() => <HomeScreen entries={entries} todayEntries={todayEntries} streak={streak} isPremium={isPremium} />}
         </Tab.Screen>
         <Tab.Screen name="Record" options={{ tabBarIcon: ({ color }) => <Text style={styles.tabIcon}>🎙️</Text> }}>
-          {() => <RecordScreen entries={entries} setEntries={setEntries} />}
+          {() => <RecordScreen entries={entries} setEntries={setEntries} isPremium={isPremium} setIsPremium={setIsPremium} />}
         </Tab.Screen>
         <Tab.Screen name="Insights" options={{ tabBarIcon: ({ color }) => <Text style={styles.tabIcon}>📊</Text> }}>
-          {() => <InsightsScreen entries={entries} />}
+          {() => <InsightsScreen entries={entries} isPremium={isPremium} />}
         </Tab.Screen>
         <Tab.Screen name="Settings" options={{ tabBarIcon: ({ color }) => <Text style={styles.tabIcon}>⚙️</Text> }}>
-          {() => <SettingsScreen />}
+          {() => <SettingsScreen isPremium={isPremium} setIsPremium={setIsPremium} />}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>
@@ -447,9 +695,23 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 20, paddingTop: 60 },
   
   // Header
-  header: { marginBottom: 30 },
+  header: { marginBottom: 20 },
   logo: { fontSize: 40, fontWeight: '700', color: colors.text, letterSpacing: -1 },
   subtitle: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
+  
+  // Streak Card
+  streakCard: { marginBottom: 20, borderRadius: 16, overflow: 'hidden' },
+  streakGradient: { padding: 20, alignItems: 'center' },
+  streakEmoji: { fontSize: 32, marginBottom: 5 },
+  streakValue: { fontSize: 36, fontWeight: '800', color: colors.text },
+  streakLabel: { fontSize: 14, color: 'rgba(255,255,255,0.8)' },
+  streakBadge: { marginTop: 8, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  streakBadgeText: { fontSize: 12, color: colors.text, fontWeight: '600' },
+  
+  streakEmptyCard: { marginBottom: 20, backgroundColor: colors.card, borderRadius: 16, padding: 20, alignItems: 'center' },
+  streakEmptyEmoji: { fontSize: 32, marginBottom: 8 },
+  streakEmptyText: { fontSize: 16, fontWeight: '600', color: colors.text },
+  streakEmptySubtext: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
   
   // Today Card
   todayCard: { alignItems: 'center', marginBottom: 30 },
@@ -467,7 +729,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
   
   // Section
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 15 },
+  sectionTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 15, marginTop: 10 },
   
   // Entries
   entryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, borderRadius: 14, padding: 16, marginBottom: 10 },
@@ -482,8 +744,20 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 18, fontWeight: '600', color: colors.text },
   emptySubtext: { fontSize: 14, color: colors.textSecondary, marginTop: 8 },
   
+  // Challenge Card
+  challengeCard: { marginBottom: 25, borderRadius: 16, overflow: 'hidden' },
+  challengeGradient: { padding: 20 },
+  challengeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  challengeEmoji: { fontSize: 20, marginRight: 8 },
+  challengeLabel: { fontSize: 14, color: colors.textSecondary, fontWeight: '600' },
+  premiumBadge: { marginLeft: 'auto', fontSize: 11, color: colors.fire, fontWeight: '600', backgroundColor: 'rgba(255,149,0,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  challengeText: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
+  challengeHint: { fontSize: 13, color: colors.textTertiary },
+  
+  challengeAnswerSection: { marginBottom: 20 },
+  
   // Record Screen
-  recordTitle: { fontSize: 32, fontWeight: '700', color: colors.text, marginBottom: 30 },
+  recordTitle: { fontSize: 32, fontWeight: '700', color: colors.text, marginBottom: 25 },
   modeToggle: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 12, padding: 4, marginBottom: 25 },
   modeButton: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 10 },
   modeButtonActive: { backgroundColor: colors.accent },
@@ -521,6 +795,21 @@ const styles = StyleSheet.create({
   positive: { color: colors.success },
   negative: { color: colors.danger },
   
+  // Mood Journey
+  moodJourneyCard: { backgroundColor: colors.card, borderRadius: 16, padding: 20, marginBottom: 15 },
+  moodJourneyGraph: { height: 120, marginBottom: 10 },
+  graphContainer: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 100 },
+  graphBar: { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' },
+  graphBarInner: { width: 12, borderRadius: 6, minHeight: 4 },
+  graphLabel: { fontSize: 8, color: colors.textTertiary, marginTop: 4 },
+  noDataText: { color: colors.textSecondary, textAlign: 'center', marginTop: 40 },
+  moodJourneyDesc: { fontSize: 12, color: colors.textSecondary },
+  
+  lockedJourneyCard: { backgroundColor: colors.card, borderRadius: 16, padding: 25, marginBottom: 15, alignItems: 'center' },
+  lockedJourneyEmoji: { fontSize: 32, marginBottom: 10 },
+  lockedJourneyText: { fontSize: 16, fontWeight: '600', color: colors.text },
+  lockedJourneySubtext: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
+  
   premiumCard: { backgroundColor: 'rgba(10, 132, 255, 0.15)', borderRadius: 16, padding: 20, marginTop: 10, borderWidth: 1, borderColor: colors.accent },
   premiumTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 10 },
   premiumText: { fontSize: 14, color: colors.textSecondary, marginBottom: 15, lineHeight: 20 },
@@ -538,6 +827,9 @@ const styles = StyleSheet.create({
   
   upgradeButton: { backgroundColor: colors.accent, borderRadius: 12, padding: 18, alignItems: 'center', marginTop: 20 },
   upgradeButtonText: { fontSize: 16, fontWeight: '600', color: colors.text },
+  
+  footer: { alignItems: 'center', marginTop: 40, marginBottom: 20 },
+  footerText: { fontSize: 12, color: colors.textTertiary },
   
   // Tab Bar
   tabBar: { backgroundColor: colors.bg, borderTopWidth: 0, paddingTop: 10, height: 90 },

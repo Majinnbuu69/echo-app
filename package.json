@@ -2,7 +2,7 @@
   "name": "echoapp",
   "version": "1.0.0",
   "main": "index.ts",
-  "homepage": "https://YOUR_GITHUB_USERNAME.github.io/echo-app/",
+  "homepage": "https://Majinnbuu69.github.io/echo-app/",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
